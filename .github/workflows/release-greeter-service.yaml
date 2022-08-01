@@ -1,0 +1,78 @@
+name: GitHub Actions Demo
+on: [push]
+jobs:
+  release-greeter-service-staging:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # python-yq has a syntax compatible with jq, so we use it instead of the
+      # yq available from aptitude (installed by default), which has its own
+      # unique syntax.
+      - name: Replace yq with python-yq
+        run: pip install yq
+
+      - name: Configure Git
+        run: |
+          git config user.email "ci@rightfoot.com"
+          git config user.name "Rightfoot CI"
+
+      - name: Login to Docker Hub
+        run: |
+          echo "${DOCKERHUB_TOKEN}" | docker login --username "willjschmitt" --password-stdin
+
+      - name: Push Image to Docker Hub
+        run: |
+          # We push with a generic tag and don't tag anything else, since we
+          # operate entirely with hash-sums rather than by tagging with a system
+          # like semver.
+          docker build greeter-server \
+              --tag "willjschmitt/greeter-server:latest" \
+              --tag "willjschmitt/greeter-server:${GITHUB_SHA}"
+          docker push "willjschmitt/greeter-server:${GITHUB_SHA}"
+
+      - name: Get Image Digest
+        run: |
+          # This needs to happen after the push, since we need the pushed digest
+          # to Docker, which can be different than the ID obtained from a local
+          # build, due to local caching.
+          SHA256=$( \
+              docker inspect willjschmitt/greeter-server:${GITHUB_SHA} \
+                  --format='{{index .RepoDigests 0}}')
+          echo "Current image hash is ${SHA256}"
+          echo "SHA256=${SHA256}" >> $GITHUB_ENV
+
+      - name: Release Image via Commit
+        run: |
+          # Attempt an update of the deployment yaml to see if the latest hash
+          # would result in an updated release.
+          yq --in-place --yaml-roundtrip \
+              ".spec.template.spec.containers[0].image |= \"${{ env.SHA256 }}\"" \
+              config/greeter-service-staging/deployment.yaml
+          
+          # Check if there is a diff a release PR can be created. 
+          if ! [[ `git status --porcelain` ]]; then
+            echo "No changes detected. Not create a pull request.";
+            # TODO(willjschmitt): GitHub Actions doesn't support an early exit
+            #  behavior, so this just fails the job to keep from continuing.
+            #  Once it does support it, exit early instead.
+            exit 1;
+          fi
+
+          # Commit the changes and push to GitHub with a unique branch name.
+          echo "Changes detected. Continuing with pull request."
+          BRANCH_NAME="release/greeter-service/staging/${GITHUB_SHA}"
+          git checkout -b "${BRANCH_NAME}"
+          git commit --all --message "Updating greeter-service staging image."
+          git push --set-upstream origin "${BRANCH_NAME}"
+          
+          # Create a pull request with the changes. 
+          gh pr create \
+              --title "Updating greeter-service:staging image." \
+              --body "Automated PR to update greeter-service:staging image to ${{ env.SHA256 }}." \
+              --head "${BRANCH_NAME}" \
+              --base "main"
