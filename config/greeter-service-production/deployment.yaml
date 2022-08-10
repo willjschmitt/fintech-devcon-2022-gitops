@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: greeter-service-production
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: greeter-service
+      environment: production
+  template:
+    metadata:
+      labels:
+        app: greeter-service
+        environment: production
+    spec:
+      containers:
+        - image: willjschmitt/greeter-server@sha256:e73ef56efd2d7385da9d5829567e76557d2e8d58eb838d9c9329fbcc79011cab
+          imagePullPolicy: IfNotPresent
+          name: greeter-server
+          ports:
+            - containerPort: 5000
