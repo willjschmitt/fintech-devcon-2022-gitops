@@ -1,17 +1,71 @@
 name: GitHub Actions Demo
 on: [push]
 jobs:
-  Explore-GitHub-Actions:
+  release-greeter-service-staging:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
-      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
-      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
-      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
-      - name: Check out repository code
+      - name: Checkout repository
         uses: actions/checkout@v3
-      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
-      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
-      - name: List files in the repository
+
+      # python-yq has a syntax compatible with jq, so we use it instead of the
+      # yq available from aptitude (installed by default), which has its own
+      # unique syntax.
+      - name: Replace yq with python-yq
+        run: pip install yq
+
+      - name: Configure Git
         run: |
-          ls ${{ github.workspace }}
-      - run: echo "🍏 This job's status is ${{ job.status }}."
+          git config user.email "ci@rightfoot.com"
+          git config user.name "Rightfoot CI"
+
+      - run: |
+          # First, build the image, and obtain the current SHA256 hash-sum to
+          # uniquely identify the build as currenyl built.
+          docker build greeter-server --tag greeter-server:latest
+          SHA256=$( \
+              docker inspect greeter-server \
+              | jq -r ".[0].Id")
+          echo "Current image hash is ${SHA256}"
+          
+          # Attempt an update of the deployment yaml to see if the latest hash
+          # would result in an updated release.
+          yq --in-place --yaml-roundtrip \
+              ".spec.template.spec.containers[0].image |= \"greeter-server@${SHA256}\"" \
+              config/greeter-service-staging/deployment.yaml
+          
+          # Check if there is a diff a release PR can be created. 
+          if ! [[ `git status --porcelain` ]]; then
+            echo "No changes detected. Not create a pull request.";
+            # TODO(willjschmitt): GitHub Actions doesn't support an early exit
+            #  behavior, so this just fails the job to keep from continuing.
+            #  Once it does support it, exit early instead.
+            exit 1;
+          fi
+
+          # Commit the changes and push to GitHub with a unique branch name.
+          echo "Changes detected. Continuing with pull request."
+          BRANCH_NAME="release/greeter-service/staging/${GITHUB_SHA}"
+          git checkout -b "${BRANCH_NAME}"
+          git commit --all --message "Updating greeter-service staging image."
+          git push --set-upstream origin "${BRANCH_NAME}"
+          
+          # Create a pull request with the changes. 
+          gh pr create \
+              --title "Updating greeter-service:staging image." \
+              --body "Automated PR to update greeter-service:staging image to ${SHA256}." \
+              --head "${BRANCH_NAME}" \
+              --base "main"
+
+#  - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
+#      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+#      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
+#      - name: Check out repository code
+#        uses: actions/checkout@v3
+#      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
+#      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
+#      - name: List files in the repository
+#        run: |
+#          ls ${{ github.workspace }}
+#      - run: echo "🍏 This job's status is ${{ job.status }}."
