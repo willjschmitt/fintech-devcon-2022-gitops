@@ -16,7 +16,7 @@ spec:
         environment: staging
     spec:
       containers:
-        - image: willjschmitt/greeter-server@sha256:e73ef56efd2d7385da9d5829567e76557d2e8d58eb838d9c9329fbcc79011cab
+        - image: greeter-server@sha256:50085717dd27ac5725c227867d1b3e858e822dc6c95a02eb3baf37b1d57942bc
           imagePullPolicy: IfNotPresent
           name: greeter-server
           ports:
