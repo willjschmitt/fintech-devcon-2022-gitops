@@ -16,7 +16,7 @@ spec:
         environment: production
     spec:
       containers:
-        - image: willjschmitt/greeter-server@sha256:14bc7ffa918bf88f495b845a7e8f52211a60920750f55d40b7d1f83748b8a5f1
+        - image: willjschmitt/greeter-server@sha256:38f3979c395fce21f29f6f8298fe48e2e9612373dd9329531b2d1599cdb3bd75
           imagePullPolicy: IfNotPresent
           name: greeter-server
           ports:
